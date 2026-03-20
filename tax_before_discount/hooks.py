@@ -5,6 +5,12 @@ app_description = "this is pre discount tax calculation"
 app_email = "safdar211@gmail.com"
 app_license = "mit"
 
+doc_events = {
+    "Sales Invoice": {
+        "validate": "tax_before_discount.tax_before_discount.overrides.sales_invoice.calculate_tax_before_discount"
+    }
+}
+
 # Apps
 # ------------------
 

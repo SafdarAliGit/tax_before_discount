@@ -1,0 +1,91 @@
+{
+    "actions": [],
+    "creation": "2024-01-01 00:00:00.000000",
+    "doctype": "DocType",
+    "editable_grid": 1,
+    "engine": "InnoDB",
+    "field_order": [
+        "enabled",
+        "apply_on_companies_section",
+        "apply_to_all_companies",
+        "company",
+        "column_break_1",
+        "tax_calculation_method",
+        "apply_on_item_tax",
+        "apply_on_charge_type"
+    ],
+    "fields": [
+        {
+            "default": "1",
+            "fieldname": "enabled",
+            "fieldtype": "Check",
+            "label": "Enable Tax Before Discount"
+        },
+        {
+            "fieldname": "apply_on_companies_section",
+            "fieldtype": "Section Break",
+            "label": "Scope"
+        },
+        {
+            "default": "1",
+            "fieldname": "apply_to_all_companies",
+            "fieldtype": "Check",
+            "label": "Apply to All Companies"
+        },
+        {
+            "depends_on": "eval:!doc.apply_to_all_companies",
+            "fieldname": "company",
+            "fieldtype": "Link",
+            "label": "Company",
+            "options": "Company"
+        },
+        {
+            "fieldname": "column_break_1",
+            "fieldtype": "Column Break"
+        },
+        {
+            "default": "On Net Total",
+            "fieldname": "tax_calculation_method",
+            "fieldtype": "Select",
+            "label": "Tax Calculation Base",
+            "options": "On Net Total\nOn Previous Row Total\nOn Previous Row Amount"
+        },
+        {
+            "default": "1",
+            "fieldname": "apply_on_item_tax",
+            "fieldtype": "Check",
+            "label": "Apply on Item-Level Tax Template"
+        },
+        {
+            "default": "1",
+            "fieldname": "apply_on_charge_type",
+            "fieldtype": "Check",
+            "label": "Apply on Invoice-Level Taxes & Charges"
+        }
+    ],
+    "issingle": 1,
+    "links": [],
+    "modified": "2024-01-01 00:00:00.000000",
+    "modified_by": "Administrator",
+    "module": "Tax Before Discount",
+    "name": "Tax Before Discount Settings",
+    "owner": "Administrator",
+    "permissions": [
+        {
+            "create": 1,
+            "delete": 1,
+            "email": 1,
+            "print": 1,
+            "read": 1,
+            "role": "System Manager",
+            "share": 1,
+            "write": 1
+        }
+    ],
+    "sort_field": "modified",
+    "sort_order": "DESC",
+    "doctype": "DocType",
+    "name": "Tax Before Discount Settings",
+    "module": "Tax Before Discount",
+    "issingle": 1
+}
