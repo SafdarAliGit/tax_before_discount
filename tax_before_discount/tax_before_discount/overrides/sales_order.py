@@ -6,11 +6,11 @@ from frappe.utils import flt
 
 def calculate_tax_before_discount(doc, method):
     """
-    Hook: Delivery Note - validate
-    1. Carries discount_account from SO Item if not already set.
+    Hook: Sales Order - validate
+    1. Fetches discount_account from applied Pricing Rule per item.
     2. Recalculates taxes based on pre-discount item totals.
     """
-    _set_discount_account(doc)
+    _set_discount_account_from_pricing_rule(doc)
 
     settings = frappe.get_single("Tax Before Discount Settings")
 
@@ -44,49 +44,33 @@ def calculate_tax_before_discount(doc, method):
     )
 
 
-def _set_discount_account(doc):
+def _set_discount_account_from_pricing_rule(doc):
     """
-    For each Delivery Note item row, set discount_account by looking up:
-
-    Priority 1: so_detail → Sales Order Item.discount_account
-                (SO Item already has it set via Pricing Rule logic)
-
-    Priority 2: item.pricing_rules / item.pricing_rule fields
-                (in case DN is created independently without SO)
-
-    Priority 3: DB lookup by item_code + company in Pricing Rule
-                (last resort fallback)
-
-    Does not overwrite if already set manually.
+    For each Sales Order item row:
+      1. Try item.pricing_rules (JSON array or comma string)
+      2. Try item.pricing_rule  (single value field)
+      3. Fall back to DB lookup by item_code + company
+    Sets item.discount_account if found and not already set.
     """
     for item in doc.items:
+        # Do not overwrite if already set manually
         if item.get("discount_account"):
             continue
 
         discount_account = None
 
-        # Priority 1: from linked Sales Order Item row
-        so_detail = item.get("so_detail")
-        if so_detail:
-            discount_account = frappe.db.get_value(
-                "Sales Order Item",
-                so_detail,
-                "discount_account"
-            )
+        # Strategy 1: item.pricing_rules field (ERPNext v15 stores as JSON array)
+        rule_names = _parse_pricing_rules_field(item.get("pricing_rules"))
+        if rule_names:
+            discount_account = _fetch_discount_account_from_rules(rule_names)
 
-        # Priority 2: from item.pricing_rules field
-        if not discount_account:
-            rule_names = _parse_pricing_rules_field(item.get("pricing_rules"))
-            if rule_names:
-                discount_account = _fetch_discount_account_from_rules(rule_names)
-
-        # Priority 3: from item.pricing_rule single field
+        # Strategy 2: item.pricing_rule single field (fallback)
         if not discount_account:
             single_rule = item.get("pricing_rule")
             if single_rule:
                 discount_account = _fetch_discount_account_from_rules([single_rule])
 
-        # Priority 4: DB lookup by item_code + company
+        # Strategy 3: lookup by item_code directly in Pricing Rule Item Code child table
         if not discount_account:
             discount_account = _fetch_discount_account_by_item(
                 item.item_code,
@@ -95,6 +79,19 @@ def _set_discount_account(doc):
 
         if discount_account:
             item.discount_account = discount_account
+
+        # DEBUG — remove after confirming it works
+        frappe.log_error(
+            title="SO Item Pricing Rule Debug",
+            message=frappe.as_json({
+                "item_code": item.item_code,
+                "pricing_rules_raw": item.get("pricing_rules"),
+                "pricing_rule_raw": item.get("pricing_rule"),
+                "parsed_rules": _parse_pricing_rules_field(item.get("pricing_rules")),
+                "discount_account_found": discount_account,
+                "discount_account_on_item": item.get("discount_account")
+            })
+        )
 
 
 def _parse_pricing_rules_field(value):
@@ -110,6 +107,7 @@ def _parse_pricing_rules_field(value):
 
     value = value.strip()
 
+    # Try JSON array first
     if value.startswith("["):
         try:
             parsed = json.loads(value)
@@ -117,6 +115,7 @@ def _parse_pricing_rules_field(value):
         except Exception:
             pass
 
+    # Fall back to comma-separated or plain string
     return [r.strip() for r in value.split(",") if r.strip()]
 
 
@@ -124,6 +123,7 @@ def _fetch_discount_account_from_rules(rule_names):
     """
     Given a list of Pricing Rule names, returns the first
     discount_account found across those rules.
+    Pricing Rule name is unique so no company filter needed.
     """
     for rule_name in rule_names:
         if not rule_name:
@@ -140,7 +140,8 @@ def _fetch_discount_account_from_rules(rule_names):
 
 def _fetch_discount_account_by_item(item_code, company):
     """
-    Fallback: searches Pricing Rule Item Code child table for rules
+    Strategy 3 fallback.
+    Searches Pricing Rule Item Code child table for rules
     that apply to this item_code, then fetches discount_account
     from the parent Pricing Rule filtered by company, selling=1,
     not disabled, and discount_account is set.
@@ -172,6 +173,9 @@ def _fetch_discount_account_by_item(item_code, company):
 
 
 def _has_discount(doc):
+    """
+    Returns True if any discount exists at order or item level.
+    """
     if flt(doc.discount_amount) or flt(doc.additional_discount_percentage):
         return True
 
@@ -183,6 +187,11 @@ def _has_discount(doc):
 
 
 def _get_pre_discount_net_total(doc):
+    """
+    Computes total BEFORE any discount.
+    Uses price_list_rate * qty per item.
+    Falls back to rate * qty if price_list_rate is not set.
+    """
     total = 0.0
     for item in doc.items:
         base_rate = flt(item.price_list_rate) if flt(item.price_list_rate) else flt(item.rate)
@@ -191,6 +200,14 @@ def _get_pre_discount_net_total(doc):
 
 
 def _recalculate_taxes(doc, pre_discount_total):
+    """
+    Recalculates tax rows using pre_discount_total as base.
+
+    charge_type handling:
+      - On Net Total  → recalculate using pre_discount_total
+      - Actual        → fixed amount, only update running total fields
+      - anything else → skip
+    """
     running_total = flt(pre_discount_total)
 
     for tax in doc.taxes:
@@ -219,8 +236,9 @@ def _recalculate_taxes(doc, pre_discount_total):
 
 def _recalculate_totals(doc):
     """
-    Recomputes document-level totals after tax rows are adjusted.
-    Delivery Note has no outstanding_amount or disable_rounded_total.
+    Recomputes order-level totals after tax rows are adjusted.
+    net_total (post-discount) is intentionally left intact.
+    Sales Order has no outstanding_amount — that is invoice-only.
     """
     total_taxes = sum(flt(t.tax_amount) for t in doc.taxes)
 

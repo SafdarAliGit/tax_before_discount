@@ -9,14 +9,24 @@ doc_events = {
     "Sales Invoice": {
         "validate": "tax_before_discount.tax_before_discount.overrides.sales_invoice.calculate_tax_before_discount"
     },
-    "Purchase Invoice": {
-        "validate": "tax_before_discount.tax_before_discount.overrides.purchase_invoice.calculate_tax_before_discount"
+    "Sales Order": {
+        "validate": "tax_before_discount.tax_before_discount.overrides.sales_order.calculate_tax_before_discount"
     },
     "Delivery Note": {
         "validate": "tax_before_discount.tax_before_discount.overrides.delivery_note.calculate_tax_before_discount"
     }
 }
 
+
+fixtures = [
+    {
+        "dt": "Custom Field",
+        "filters": [
+            ["dt", "in", ["Sales Order Item", "Delivery Note Item", "Pricing Rule"]],
+            ["fieldname", "=", "discount_account"]
+        ]
+    }
+]
 # Apps
 # ------------------
 

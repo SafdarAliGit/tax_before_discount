@@ -1,0 +1,42 @@
+[
+    {
+        "doctype": "Custom Field",
+        "name": "Sales Order Item-discount_account",
+        "dt": "Sales Order Item",
+        "fieldname": "discount_account",
+        "fieldtype": "Link",
+        "label": "Discount Account",
+        "options": "Account",
+        "insert_after": "discount_amount",
+        "read_only": 0,
+        "in_list_view": 0,
+        "print_hide": 1
+    },
+    {
+        "doctype": "Custom Field",
+        "name": "Delivery Note Item-discount_account",
+        "dt": "Delivery Note Item",
+        "fieldname": "discount_account",
+        "fieldtype": "Link",
+        "label": "Discount Account",
+        "options": "Account",
+        "insert_after": "discount_amount",
+        "read_only": 0,
+        "in_list_view": 0,
+        "print_hide": 1
+    },
+    {
+        "doctype": "Custom Field",
+        "name": "Pricing Rule-discount_account",
+        "dt": "Pricing Rule",
+        "fieldname": "discount_account",
+        "fieldtype": "Link",
+        "label": "Discount Account",
+        "options": "Account",
+        "insert_after": "discount_amount",
+        "depends_on": "eval:doc.discount_type == 'Discount Amount' || doc.price_or_product_discount == 'Price'",
+        "read_only": 0,
+        "in_list_view": 0,
+        "print_hide": 1
+    }
+]

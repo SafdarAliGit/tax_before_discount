@@ -1,4 +1,5 @@
 import frappe
+import json
 from frappe import _
 from frappe.utils import flt
 
@@ -6,9 +7,11 @@ from frappe.utils import flt
 def calculate_tax_before_discount(doc, method):
     """
     Hook: Sales Invoice - validate
-    Recalculates taxes based on pre-discount item totals
-    instead of the post-discount net total.
+    1. Carries discount_account from DN Item → SO Item → Pricing Rule.
+    2. Recalculates taxes based on pre-discount item totals.
     """
+    _set_discount_account(doc)
+
     settings = frappe.get_single("Tax Before Discount Settings")
 
     if not settings.enabled:
@@ -41,15 +44,149 @@ def calculate_tax_before_discount(doc, method):
     )
 
 
+def _set_discount_account(doc):
+    """
+    For each Sales Invoice item row, set discount_account by looking up:
+
+    Priority 1: dn_detail → Delivery Note Item.discount_account
+                (DN Item already has it set via SO Item logic)
+
+    Priority 2: so_detail → Sales Order Item.discount_account
+                (in case invoice is created directly from SO, no DN)
+
+    Priority 3: item.pricing_rules / item.pricing_rule fields
+                (in case invoice is created independently)
+
+    Priority 4: DB lookup by item_code + company in Pricing Rule
+                (last resort fallback)
+
+    Does not overwrite if already set manually.
+    Sales Invoice Item has the standard discount_account field —
+    we are populating it from upstream documents.
+    """
+    for item in doc.items:
+        if item.get("discount_account"):
+            continue
+
+        discount_account = None
+
+        # Priority 1: from linked Delivery Note Item row
+        dn_detail = item.get("dn_detail")
+        if dn_detail:
+            discount_account = frappe.db.get_value(
+                "Delivery Note Item",
+                dn_detail,
+                "discount_account"
+            )
+
+        # Priority 2: from linked Sales Order Item row
+        if not discount_account:
+            so_detail = item.get("so_detail")
+            if so_detail:
+                discount_account = frappe.db.get_value(
+                    "Sales Order Item",
+                    so_detail,
+                    "discount_account"
+                )
+
+        # Priority 3: from item.pricing_rules field
+        if not discount_account:
+            rule_names = _parse_pricing_rules_field(item.get("pricing_rules"))
+            if rule_names:
+                discount_account = _fetch_discount_account_from_rules(rule_names)
+
+        # Priority 4: from item.pricing_rule single field
+        if not discount_account:
+            single_rule = item.get("pricing_rule")
+            if single_rule:
+                discount_account = _fetch_discount_account_from_rules([single_rule])
+
+        # Priority 5: DB lookup by item_code + company
+        if not discount_account:
+            discount_account = _fetch_discount_account_by_item(
+                item.item_code,
+                doc.company
+            )
+
+        if discount_account:
+            item.discount_account = discount_account
+
+
+def _parse_pricing_rules_field(value):
+    """
+    Parses the pricing_rules field which ERPNext v15 stores as:
+      - None or empty string     → return []
+      - JSON array string        → '["PRULE-0001"]' → ["PRULE-0001"]
+      - Comma-separated string   → "PRULE-0001,PRULE-0002" → [...]
+      - Plain single string      → "PRULE-0001" → ["PRULE-0001"]
+    """
+    if not value:
+        return []
+
+    value = value.strip()
+
+    if value.startswith("["):
+        try:
+            parsed = json.loads(value)
+            return [r for r in parsed if r]
+        except Exception:
+            pass
+
+    return [r.strip() for r in value.split(",") if r.strip()]
+
+
+def _fetch_discount_account_from_rules(rule_names):
+    """
+    Given a list of Pricing Rule names, returns the first
+    discount_account found across those rules.
+    """
+    for rule_name in rule_names:
+        if not rule_name:
+            continue
+        result = frappe.db.get_value(
+            "Pricing Rule",
+            rule_name,
+            "discount_account"
+        )
+        if result:
+            return result
+    return None
+
+
+def _fetch_discount_account_by_item(item_code, company):
+    """
+    Fallback: searches Pricing Rule Item Code child table for rules
+    that apply to this item_code, then fetches discount_account
+    from the parent Pricing Rule filtered by company, selling=1,
+    not disabled, and discount_account is set.
+    """
+    if not item_code:
+        return None
+
+    rules_with_item = frappe.db.get_all(
+        "Pricing Rule Item Code",
+        filters={"item_code": item_code},
+        pluck="parent"
+    )
+
+    if not rules_with_item:
+        return None
+
+    result = frappe.db.get_value(
+        "Pricing Rule",
+        {
+            "name": ["in", rules_with_item],
+            "company": company,
+            "selling": 1,
+            "disable": 0,
+            "discount_account": ["not in", ["", None]]
+        },
+        "discount_account"
+    )
+    return result or None
+
+
 def _has_discount(doc):
-    """
-    Returns True if any discount exists at invoice or item level.
-    Covers:
-      - doc.additional_discount_percentage  (invoice-level %)
-      - doc.discount_amount                 (invoice-level flat)
-      - item.discount_percentage            (per-item %)
-      - item.discount_amount                (per-item flat)
-    """
     if flt(doc.discount_amount) or flt(doc.additional_discount_percentage):
         return True
 
@@ -61,16 +198,6 @@ def _has_discount(doc):
 
 
 def _get_pre_discount_net_total(doc):
-    """
-    Computes the total BEFORE any discount is applied.
-
-    Uses price_list_rate * qty per item — price_list_rate is the
-    catalogue rate before item-level discount_percentage or
-    discount_amount is deducted.
-
-    Falls back to item.rate * qty if price_list_rate is not set
-    (e.g. manually entered invoices with no price list).
-    """
     total = 0.0
     for item in doc.items:
         base_rate = flt(item.price_list_rate) if flt(item.price_list_rate) else flt(item.rate)
@@ -79,25 +206,6 @@ def _get_pre_discount_net_total(doc):
 
 
 def _recalculate_taxes(doc, pre_discount_total):
-    """
-    Iterates over doc.taxes and recalculates each row using
-    pre_discount_total as the base instead of net_total.
-
-    charge_type handling:
-      - 'On Net Total'  → recalculate using pre_discount_total
-      - 'Actual'        → fixed amount, do not touch tax_amount;
-                          only update running total fields
-      - anything else   → skip (On Previous Row Total/Amount are
-                          rare on Sales Invoices and cascade from
-                          the first row; touching them separately
-                          would double-correct)
-
-    All monetary fields on the tax row are kept in sync:
-      tax_amount, base_tax_amount,
-      tax_amount_after_discount_amount,
-      base_tax_amount_after_discount_amount,
-      total, base_total
-    """
     running_total = flt(pre_discount_total)
 
     for tax in doc.taxes:
@@ -119,31 +227,15 @@ def _recalculate_taxes(doc, pre_discount_total):
             tax.base_total = running_total
 
         elif tax.charge_type == "Actual":
-            # Fixed rupee/amount taxes — do not alter tax_amount.
-            # Still update the running cumulative total field.
             running_total = flt(running_total + flt(tax.tax_amount), tax.precision("total"))
             tax.total      = running_total
             tax.base_total = running_total
 
-        # On Previous Row Total / On Previous Row Amount — leave untouched.
-        # They are edge cases; if needed, extend this block.
-
 
 def _recalculate_totals(doc):
     """
-    Recomputes invoice-level total fields after tax rows are adjusted.
-
-    What we deliberately do NOT change:
-      - doc.net_total      → discount already applied by ERPNext; correct
-      - doc.total          → pre-tax item total; correct
-      - item-level amounts → not our concern; only taxes change
-
-    What we recalculate:
-      - total_taxes_and_charges
-      - grand_total / base_grand_total
-      - rounding_adjustment
-      - rounded_total / base_rounded_total
-      - outstanding_amount
+    Recomputes invoice-level totals after tax rows are adjusted.
+    net_total (post-discount) is intentionally left intact.
     """
     total_taxes = sum(flt(t.tax_amount) for t in doc.taxes)
 
@@ -165,8 +257,6 @@ def _recalculate_totals(doc):
     doc.rounding_adjustment      = rounding_adj
     doc.base_rounding_adjustment = rounding_adj
 
-    # outstanding_amount follows rounded_total when rounding is active,
-    # otherwise follows grand_total
     if not doc.disable_rounded_total:
         doc.outstanding_amount = rounded
     else:
