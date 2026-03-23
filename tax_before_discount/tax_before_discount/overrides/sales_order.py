@@ -2,6 +2,8 @@ import frappe
 import json
 from frappe import _
 from frappe.utils import flt
+from erpnext.controllers.accounts_controller import get_taxes_and_charges
+from erpnext.controllers.taxes_and_totals import calculate_taxes_and_totals
 
 
 def calculate_tax_before_discount(doc, method):
@@ -35,6 +37,7 @@ def calculate_tax_before_discount(doc, method):
     _recalculate_taxes(doc, pre_discount_total)
     _recalculate_totals(doc)
     _set_order_booker(doc)
+    _set_tax_template(doc)
 
 
     frappe.msgprint(
@@ -276,3 +279,22 @@ def _set_order_booker(doc):
     )
 
     doc.order_booker = sales_person or ""
+
+def _set_tax_template(doc):
+    if not doc.customer:
+        return
+
+    tax_template = frappe.db.get_value(
+        "Customer",
+        doc.customer,
+        "taxes_and_charges"
+    )
+
+    if tax_template:
+        doc.taxes_and_charges = tax_template
+        # Fetch and populate taxes child table rows from the template
+        doc.set("taxes", get_taxes_and_charges("Sales Taxes and Charges Template", tax_template))
+        calculate_taxes_and_totals(doc)
+    else:
+        doc.taxes_and_charges = ""
+        doc.set("taxes", [])
