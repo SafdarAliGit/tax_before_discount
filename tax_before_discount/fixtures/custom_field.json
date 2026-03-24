@@ -39,42 +39,6 @@
         "in_list_view": 0,
         "print_hide": 1
     },
-    {
-        "doctype": "Custom Field",
-        "name": "Sales Order-order_booker",
-        "dt": "Sales Order",
-        "fieldname": "order_booker",
-        "fieldtype": "Data",
-        "label": "Order Booker",
-        "insert_after": "po_no",
-        "read_only": 1,
-        "in_list_view": 0,
-        "print_hide": 0
-  },
-  {
-        "doctype": "Custom Field",
-        "name": "Sales Invoice-order_booker",
-        "dt": "Sales Invoice",
-        "fieldname": "order_booker",
-        "fieldtype": "Data",
-        "label": "Order Booker",
-        "insert_after": "customer",
-        "read_only": 1,
-        "in_list_view": 0,
-        "print_hide": 0
-  },
-  {
-        "doctype": "Custom Field",
-        "name": "Delivery Note-order_booker",
-        "dt": "Delivery Note",
-        "fieldname": "order_booker",
-        "fieldtype": "Data",
-        "label": "Order Booker",
-        "insert_after": "is_return",
-        "read_only": 1,
-        "in_list_view": 0,
-        "print_hide": 0
-  },
   {
     "doctype": "Custom Field",
     "name": "Customer-taxes_and_charges",

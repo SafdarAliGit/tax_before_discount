@@ -34,7 +34,7 @@ def calculate_tax_before_discount(doc, method):
     if not post_discount_total:
         return
 
-    _set_order_booker(doc)
+    # _set_order_booker(doc)
     _set_tax_template(doc)
     _recalculate_taxes(doc, pre_discount_total)
     _recalculate_totals(doc)

@@ -268,16 +268,32 @@ def _set_order_booker(doc):
     if not doc.customer:
         return
 
-    sales_person = frappe.db.get_value(
+    sales_team_rows = frappe.db.get_all(
         "Sales Team",
-        {
+        filters={
             "parent": doc.customer,
             "parenttype": "Customer"
         },
-        "sales_person"
+        fields=["sales_person", "allocated_percentage"],
+        order_by="idx asc"
     )
 
-    doc.order_booker = sales_person or ""
+    if not sales_team_rows:
+        return
+
+    doc.set("sales_team", [])
+
+    for row in sales_team_rows:
+        if not row.sales_person:
+            continue
+        allocated_amount = (
+            (doc.grand_total or 0) * (row.allocated_percentage or 0) / 100
+        )
+        doc.append("sales_team", {
+            "sales_person":         row.sales_person,
+            "allocated_percentage": row.allocated_percentage or 0,
+            "allocated_amount":     allocated_amount,
+        })
 
 def _set_tax_template(doc):
     if not doc.customer:
