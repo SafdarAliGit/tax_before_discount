@@ -10,7 +10,7 @@ doc_events = {
         "validate": "tax_before_discount.tax_before_discount.overrides.sales_invoice.calculate_tax_before_discount"
     },
     "Sales Order": {
-        "validate": "tax_before_discount.tax_before_discount.overrides.sales_order.calculate_tax_before_discount"
+        "on_update": "tax_before_discount.tax_before_discount.overrides.sales_order.calculate_tax_before_discount"
     },
     "Delivery Note": {
         "validate": "tax_before_discount.tax_before_discount.overrides.delivery_note.calculate_tax_before_discount"
